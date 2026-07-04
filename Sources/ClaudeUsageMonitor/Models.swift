@@ -154,6 +154,7 @@ struct CCUsage: Decodable {
 enum AppError: LocalizedError {
     case keychain(String)
     case http(Int)
+    case rateLimited(retryAfter: TimeInterval?)
     case ccusage(String)
 
     var errorDescription: String? {
@@ -161,6 +162,7 @@ enum AppError: LocalizedError {
         case .keychain(let m): return "Keychain: \(m)"
         case .http(401): return "Auth expired — open Claude Code to refresh, then retry."
         case .http(let c): return "Usage API returned HTTP \(c)."
+        case .rateLimited: return "Rate-limited by the usage API — retrying shortly."
         case .ccusage(let m): return "ccusage: \(m)"
         }
     }

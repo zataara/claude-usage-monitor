@@ -19,7 +19,12 @@ final class Store {
     }
 
     private var timer: Timer?
+    private var retryTimer: Timer?
     private static let intervalKey = "refreshIntervalMinutes"
+
+    /// Bounds for honoring a 429 `Retry-After` (seconds): don't retry faster than
+    /// this, don't wait absurdly long before the next attempt.
+    private static let retryBounds: ClosedRange<TimeInterval> = 30...300
 
     init() {
         let saved = UserDefaults.standard.integer(forKey: Self.intervalKey)
@@ -77,11 +82,30 @@ final class Store {
         do {
             usage = try await usageResult
             usageError = nil
+            retryTimer?.invalidate()   // recovered
+        } catch let AppError.rateLimited(retryAfter) {
+            // Transient: keep last-good data on screen. Only surface a message when we
+            // have nothing to show yet. Either way, back off and retry once.
+            if usage == nil {
+                usageError = AppError.rateLimited(retryAfter: retryAfter).errorDescription
+            }
+            scheduleRetry(after: retryAfter)
         } catch {
             usageError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         block = await blockResult ?? block   // keep last good block on failure
         lastRefresh = Date()
+    }
+
+    /// One-shot retry after a 429, honoring `Retry-After` clamped to `retryBounds`.
+    /// Separate from the repeating timer so it doesn't disturb the normal cadence.
+    private func scheduleRetry(after retryAfter: TimeInterval?) {
+        let delay = min(max(retryAfter ?? Self.retryBounds.lowerBound,
+                            Self.retryBounds.lowerBound), Self.retryBounds.upperBound)
+        retryTimer?.invalidate()
+        retryTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in await self?.refresh() }
+        }
     }
 
     private func scheduleTimer() {

@@ -44,8 +44,17 @@ enum UsageAPI {
         req.setValue(beta, forHTTPHeaderField: "anthropic-beta")
 
         let (data, resp) = try await URLSession.shared.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        guard code == 200 else { throw AppError.http(code) }
+        let http = resp as? HTTPURLResponse
+        let code = http?.statusCode ?? -1
+        guard code == 200 else {
+            // 429 is transient (shared rolling limit across OAuth clients; common on
+            // wake). Surface the server's Retry-After so we back off instead of hammering.
+            if code == 429 {
+                let ra = http?.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
+                throw AppError.rateLimited(retryAfter: ra)
+            }
+            throw AppError.http(code)
+        }
         return try JSON.decoder.decode(UsageResponse.self, from: data)
     }
 }

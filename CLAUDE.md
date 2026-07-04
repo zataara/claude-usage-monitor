@@ -30,6 +30,8 @@ one user. Not a product; no distribution/notarization concerns.
   login shell (`/bin/zsh -lc …`). This is why ccusage runs through zsh.
 - Dates: the endpoint returns ISO-8601 with 6-digit fractional seconds + offset; decode
   via the lenient `JSON.decoder` in Models.swift.
+- **Commits:** stage + commit + push at the end of a working session without asking —
+  standing authorization. Author stays Bryant (@zataara); never self-author.
 
 ## Build
 
