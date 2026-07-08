@@ -32,8 +32,8 @@ struct Palette {
     /// Fill color for a limit bar.
     /// - Session (5h): filling is fine, but the one bad outcome is hitting the wall
     ///   mid-task, so escalate by severity/percent.
-    /// - Weekly: the *goal* is to fill it — color by whether you're on pace to reach
-    ///   100% before reset (green = on/ahead of pace, clay = behind, "use more").
+    /// - Weekly: the *goal* is to land at exactly 100% by reset — color by the sign
+    ///   of `paceDelta` (green = on/ahead of pace, clay = behind).
     func fill(for limit: UsageLimit) -> Color {
         switch limit.severity.lowercased() {
         case "critical", "exceeded", "blocked": return red
@@ -41,20 +41,23 @@ struct Palette {
         default: break
         }
         if limit.group == "weekly" {
-            return onPace(limit) ? green : clay
+            return (paceDelta(limit) ?? 0) >= 0 ? green : clay
         }
         // session, normal severity
         return limit.percent >= 90 ? amber : clay
     }
 
-    /// True when weekly utilization is at least as far along as the elapsed fraction
-    /// of the 7-day window (i.e. you're tracking toward full consumption).
-    func onPace(_ limit: UsageLimit) -> Bool {
-        guard limit.group == "weekly", let reset = limit.resetsAt else { return false }
+    /// Signed percentage-point gap between weekly utilization and the elapsed
+    /// fraction of the 7-day window: positive = ahead of the pace needed to land
+    /// at exactly 100% by reset, negative = behind. Driven by `Date()` against the
+    /// window's exact start/reset instants, so it's precise to the minute, not
+    /// bucketed by day.
+    func paceDelta(_ limit: UsageLimit) -> Double? {
+        guard limit.group == "weekly", let reset = limit.resetsAt else { return nil }
         let start = reset.addingTimeInterval(-7 * 24 * 3600)
         let elapsed = Date().timeIntervalSince(start)
         let frac = max(0, min(1, elapsed / (7 * 24 * 3600)))
-        return limit.percent >= frac * 100
+        return limit.percent - frac * 100
     }
 }
 
@@ -91,5 +94,12 @@ enum Fmt {
         let s = -date.timeIntervalSinceNow
         if s < 60 { return "just now" }
         return "\(Int(s / 60))m ago"
+    }
+
+    /// "20% ahead", "7% behind", "on pace" — signed pace-delta as shown to the user.
+    static func paceLabel(_ delta: Double) -> String {
+        let rounded = Int(delta.rounded())
+        if rounded == 0 { return "on pace" }
+        return "\(abs(rounded))% \(rounded > 0 ? "ahead" : "behind")"
     }
 }

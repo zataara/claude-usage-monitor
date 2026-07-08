@@ -2,7 +2,7 @@
 
 _Living status doc. Update the date + "Current state" whenever you touch the repo._
 
-**Last touched:** 2026-07-03 · **Version:** 0.1.0 · **State:** working, in daily use.
+**Last touched:** 2026-07-08 · **Version:** 0.1.0 · **State:** working, in daily use.
 
 ## Current state
 
@@ -53,7 +53,6 @@ then quit + relaunch (or log out/in).
 
 - Historical snapshots + a mini weekly trend sparkline (persist each poll to disk).
 - Notification when the 5h window nears 100% (avoid idling into a throttle mid-task).
-- "On pace" math surfaced more prominently (you're optimizing for full weekly utilization).
 - Optional: per-model weekly bars only when present (already data-driven).
 - Replace ad-hoc signing with a proper cert if it ever needs to leave this machine.
 

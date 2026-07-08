@@ -117,10 +117,10 @@ struct LimitBar: View {
             HStack {
                 Text(Fmt.resetsIn(limit.resetsAt)).font(.caption2).foregroundStyle(palette.subtle)
                 Spacer()
-                if limit.group == "weekly" {
-                    Text(palette.onPace(limit) ? "on pace" : "behind — use more")
+                if limit.group == "weekly", let delta = palette.paceDelta(limit) {
+                    Text(Fmt.paceLabel(delta))
                         .font(.caption2)
-                        .foregroundStyle(palette.onPace(limit) ? palette.green : palette.clay)
+                        .foregroundStyle(delta >= 0 ? palette.green : palette.clay)
                 }
             }
         }

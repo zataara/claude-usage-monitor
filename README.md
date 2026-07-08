@@ -13,7 +13,8 @@ pace** to fill them, not by how "dangerous" the level is.
 **Focal — official rate-limit windows** (`GET api.anthropic.com/api/oauth/usage`):
 
 - 5-hour session % + reset countdown (primary; menu-bar number)
-- Weekly (all models) % + reset, with an on-pace / behind indicator
+- Weekly (all models) % + reset, with a signed pace indicator (e.g. `20% ahead`,
+  `7% behind`, `on pace`) — the gap between usage% and elapsed-time% of the window
 - Per-model weekly caps when present (e.g. `Weekly · Opus`)
 - Overage credit pool ($ used / cap)
 
