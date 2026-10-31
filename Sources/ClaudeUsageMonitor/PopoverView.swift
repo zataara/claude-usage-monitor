@@ -55,6 +55,14 @@ struct PopoverView: View {
                 Circle().fill(p.clay).frame(width: 9, height: 9)
             }
             Text("Claude Usage").font(.system(size: 14, weight: .bold))
+            if let plan = store.plan {
+                Text(plan)
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .foregroundStyle(p.clay)
+                    .background(p.clay.opacity(0.14), in: Capsule())
+                    .help("Subscription plan")
+            }
             Spacer()
             Text(Fmt.agoShort(store.lastRefresh)).font(.caption2).foregroundStyle(p.subtle)
             Button {

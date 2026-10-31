@@ -2,16 +2,19 @@
 
 _Living status doc. Update the date + "Current state" whenever you touch the repo._
 
-**Last touched:** 2026-07-08 · **Version:** 0.1.0 · **State:** working, in daily use.
+**Last touched:** 2026-10-31 · **Version:** 0.2.0 · **State:** working, in daily use.
 
 ## Current state
 
 A native macOS menu-bar app showing Claude subscription usage. Built and verified against
-live data. Menu bar shows the Claude sunburst mark + `<5h%> · <weekly%>`; clicking opens a
-popover with all rate-limit windows, an overage/credit bar, and ccusage session detail.
+live data. Menu bar shows the Claude sunburst mark + `<5h%> · <weekly%>`, or `<weekly%>` on
+plans with no 5-hour window (Ultra, since 2026-10); clicking opens a popover with a plan
+badge, all rate-limit windows, an overage/credit bar, and ccusage session detail.
 
 - Focal data: official endpoint `GET api.anthropic.com/api/oauth/usage` (OAuth bearer from
   keychain) → `limits[]` (session / weekly_all / weekly_scoped), each `percent` + `resets_at`.
+- Plan badge: `GET api.anthropic.com/api/oauth/profile` → `organization.plan_display_name`
+  (launch, manual refresh, else ≤ every 6 h; failure keeps the last badge, never blocks usage).
 - Detail data: `ccusage blocks --active --json` (best-effort; degrades gracefully if absent).
 - Auto-refresh every 5 min (configurable in the popover) + manual refresh.
 
@@ -19,9 +22,13 @@ popover with all rate-limit windows, an overage/credit bar, and ccusage session 
 
 ```sh
 ./build.sh                                   # compile + bundle ClaudeUsageMonitor.app
+testgate run -- swift test                   # unit tests (label selection, plan badge, profile decode)
 ./.build/release/ClaudeUsageMonitor --selftest   # headless: keychain→endpoint→decode→ccusage
 ./.build/release/ClaudeUsageMonitor --snapshot out.png   # render popover + label to PNGs
 ```
+
+Run `--snapshot` from the bundled binary (`ClaudeUsageMonitor.app/Contents/MacOS/…`) — the bare
+`.build` binary has no bundle resources, so the Claude mark is missing there.
 
 `--selftest` and `--snapshot` are the fast ways to confirm the data pipeline and UI without
 opening the menu bar (which is awkward to inspect on a notched display). If `--selftest` is

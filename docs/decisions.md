@@ -61,3 +61,22 @@ redistributed.
 `ImageRenderer` under a real `NSApplication.run()` — required, or SwiftUI's main-thread
 assertion trips) exist because the menu bar is hard to inspect on a notched display. Keep them
 working; they're the fastest regression check.
+
+## Menu-bar label: adaptive, not 5-hour-primary (2026-10-31)
+
+In 2026-10 the usage endpoint stopped returning a 5-hour `session` window for Ultra
+(formerly Max 20x): `five_hour: null`, `limits[]` = weekly only. The label was hard-wired to
+the session % and fell back to the loading glyph `…` forever. Now `MenuBarText` (pure,
+`Labeling.swift`) walks a priority list — `session` → `weekly_all` → highest remaining — so
+tiers that keep the 5-hour window render exactly as before and tiers without it show weekly.
+We never hardcode which tier has which window; the endpoint is the authority.
+
+## Plan badge: profile endpoint over the keychain blob (2026-10-31)
+
+The keychain credential carries `subscriptionType`, but it reads just `max` for both Max and
+Ultra. `GET /api/oauth/profile` returns `organization.plan_display_name` ("Ultra"), the
+server's own copy, so renames need no code change. Fallback: an `organization_type` lookup
+table (`claude_team` → Team …; Team/Enterprise/Pro strings unverified) with raw title-cased
+fallthrough, plus `seat_tier`. Only those plan fields are decoded — the response also holds
+account PII we never model. Fetched on launch/manual refresh, else at most every 6 h; a
+failure never touches `usageError`.

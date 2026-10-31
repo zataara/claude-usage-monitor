@@ -1,8 +1,9 @@
 # Claude Usage Monitor
 
 Personal macOS menu-bar app that shows Claude subscription usage at a glance — built
-for one machine, one user. Click the menu-bar item to see how much of your **5-hour**
-and **weekly** rate-limit windows you've consumed, plus rich session detail.
+for one machine, one user. Click the menu-bar item to see how much of your rate-limit
+windows (**weekly**, plus **5-hour** on plans that still have one) you've consumed, which
+plan you're on, plus rich session detail.
 
 Goal-oriented: the intent is to *maximize* subscription utilization (land the weekly
 window at ~100% before it resets), so weekly bars are colored by whether you're **on
@@ -12,7 +13,12 @@ pace** to fill them, not by how "dangerous" the level is.
 
 **Focal — official rate-limit windows** (`GET api.anthropic.com/api/oauth/usage`):
 
-- 5-hour session % + reset countdown (primary; menu-bar number)
+- Menu-bar number adapts to the windows the endpoint returns: `<5h%> · <weekly%>` when a
+  5-hour session window exists, `<weekly%>` when it doesn't (e.g. Ultra, since 2026-10),
+  else the highest window. `…` = first load, `!` = error with no data, `—` = no windows.
+- 5-hour session % + reset countdown, on plans that have one
+- Plan badge in the popover header (`Ultra`, `Max`, `Pro`, `Team · Premium`, …) from
+  `GET api.anthropic.com/api/oauth/profile` — the server's own `plan_display_name`
 - Weekly (all models) % + reset, with a signed pace indicator (e.g. `20% ahead`,
   `7% behind`, `on pace`) — the gap between usage% and elapsed-time% of the window
 - Per-model weekly caps when present (e.g. `Weekly · Opus`)
@@ -71,10 +77,12 @@ Sources/ClaudeUsageMonitor/
   App.swift          MenuBarExtra scene + compact label
   PopoverView.swift  popover UI: data-driven limit bars, ccusage detail, footer
   Store.swift        @Observable refresh loop + timer + derived values
+  Labeling.swift     pure menu-bar text selection + plan badge mapping (unit-tested)
   DataSources.swift  keychain token, usage endpoint, ccusage process
   Models.swift       Codable models + lenient ISO-8601 decoder
   Theme.swift        Claude palette (scheme-aware) + formatting
   LoginItem.swift    SMAppService launch-at-login wrapper
+Tests/ClaudeUsageMonitorTests/  Swift Testing suites (`testgate run -- swift test`)
 Resources/Info.plist LSUIElement agent app (no Dock icon)
 build.sh             SPM build → .app bundle
 ```

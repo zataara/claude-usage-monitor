@@ -29,16 +29,18 @@ enum Keychain {
     }
 }
 
-// MARK: - Official usage endpoint
+// MARK: - Official OAuth endpoints (usage + profile)
 
-enum UsageAPI {
-    private static let url = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+/// Shared authenticated GET against api.anthropic.com's OAuth surface. The token is read
+/// fresh per call and only ever placed in this request's header.
+enum OAuthAPI {
+    static let base = URL(string: "https://api.anthropic.com/api/oauth/")!
     private static let beta = "oauth-2025-04-20"
 
-    static func fetch() async throws -> UsageResponse {
+    static func get<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
         let token = try await Task.detached { try Keychain.claudeAccessToken() }.value
 
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: base.appendingPathComponent(path))
         req.timeoutInterval = 15
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(beta, forHTTPHeaderField: "anthropic-beta")
@@ -55,7 +57,20 @@ enum UsageAPI {
             }
             throw AppError.http(code)
         }
-        return try JSON.decoder.decode(UsageResponse.self, from: data)
+        return try JSON.decoder.decode(T.self, from: data)
+    }
+}
+
+enum UsageAPI {
+    static func fetch() async throws -> UsageResponse {
+        try await OAuthAPI.get("usage", as: UsageResponse.self)
+    }
+}
+
+/// Plan/tier metadata. Changes rarely, so the Store polls it on a slow cadence.
+enum ProfileAPI {
+    static func fetch() async throws -> Profile {
+        try await OAuthAPI.get("profile", as: Profile.self)
     }
 }
 
