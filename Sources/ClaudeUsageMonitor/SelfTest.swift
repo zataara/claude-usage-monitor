@@ -31,12 +31,26 @@ enum SelfTest {
                 if let e = u.extraUsage {
                     print("    overage: enabled=\(e.isEnabled) used=\(e.usedCredits ?? 0)")
                 }
+                let label = MenuBarText.make(usage: u, hasError: false)
+                print("• label: \"\(label.text)\" (driver: \(label.driver))")
             } catch {
                 print("✗ usage endpoint: \(error.localizedDescription)")
                 code = 1
             }
 
-            // 3. ccusage (detail — non-fatal)
+            // 3. Profile → plan badge (decoration — non-fatal)
+            do {
+                let org = try await ProfileAPI.fetch().organization
+                if let badge = PlanBadge.text(for: org) {
+                    print("✓ plan: \(badge) (\(org?.organizationType ?? "?"), \(org?.rateLimitTier ?? "?"))")
+                } else {
+                    print("• plan: profile has no plan fields")
+                }
+            } catch {
+                print("• plan unavailable: \(error.localizedDescription)")
+            }
+
+            // 4. ccusage (detail — non-fatal)
             do {
                 if let b = try await CCUsageSource.fetch() {
                     print("✓ ccusage: \(Fmt.compactCount(b.totalTokens ?? 0)) tok, "

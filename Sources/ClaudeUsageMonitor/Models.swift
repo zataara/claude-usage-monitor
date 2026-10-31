@@ -112,6 +112,28 @@ struct Spend: Decodable {
     }
 }
 
+// MARK: - Profile endpoint (GET https://api.anthropic.com/api/oauth/profile)
+
+/// Only the plan fields are modeled. The response also carries account PII (name, email,
+/// uuids) which we deliberately never decode or hold.
+struct Profile: Decodable {
+    let organization: Organization?
+
+    struct Organization: Decodable {
+        let planDisplayName: String?    // server-authored, e.g. "Ultra"
+        let organizationType: String?   // e.g. "claude_max"
+        let rateLimitTier: String?      // e.g. "default_claude_max_20x"
+        let seatTier: String?           // Team/Enterprise seat level; nil for personal plans
+
+        enum CodingKeys: String, CodingKey {
+            case planDisplayName = "plan_display_name"
+            case organizationType = "organization_type"
+            case rateLimitTier = "rate_limit_tier"
+            case seatTier = "seat_tier"
+        }
+    }
+}
+
 // MARK: - ccusage (npx ccusage blocks --active --json) — the rich detail layer
 
 struct CCUsage: Decodable {

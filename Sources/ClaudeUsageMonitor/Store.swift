@@ -10,6 +10,13 @@ final class Store {
     var usageError: String?
     var isRefreshing = false
 
+    /// Subscription plan badge ("Ultra", "Team · Premium"); nil until a profile fetch succeeds.
+    var plan: String?
+    var planError: String?
+    private var planFetchedAt: Date?
+    /// Plan metadata changes rarely; refetch at most this often outside manual refresh.
+    private static let planMaxAge: TimeInterval = 6 * 3600
+
     /// Background auto-refresh cadence in minutes (persisted).
     var intervalMinutes: Int {
         didSet {
@@ -26,31 +33,20 @@ final class Store {
     /// this, don't wait absurdly long before the next attempt.
     private static let retryBounds: ClosedRange<TimeInterval> = 30...300
 
-    init() {
+    /// `autostart: false` gives tests a Store with no network fetch and no timers.
+    init(autostart: Bool = true) {
         let saved = UserDefaults.standard.integer(forKey: Self.intervalKey)
         intervalMinutes = saved == 0 ? 5 : saved
+        guard autostart else { return }
         Task { await refresh() }
         scheduleTimer()
     }
 
     // MARK: Derived values for the compact menu-bar label
 
-    var sessionPercent: Double? {
-        usage?.limits.first { $0.group == "session" }?.percent ?? usage?.fiveHour?.utilization
-    }
-
-    var weeklyPercent: Double? {
-        usage?.limits.first { $0.kind == "weekly_all" }?.percent ?? usage?.sevenDay?.utilization
-    }
-
-    /// Text beside the Claude mark in the menu bar. "66% · 21%" = 5-hour · weekly.
+    /// Text beside the Claude mark in the menu bar — see `MenuBarText` for the rules.
     var menuBarText: String {
-        guard let s = sessionPercent else {
-            return usageError == nil ? "…" : "!"
-        }
-        let head = "\(Int(s.rounded()))%"
-        if let w = weeklyPercent { return "\(head) · \(Int(w.rounded()))%" }
-        return head
+        MenuBarText.make(usage: usage, hasError: usageError != nil).text
     }
 
     /// Limits sorted for display: session first, then weekly windows.
@@ -70,7 +66,9 @@ final class Store {
 
     // MARK: Refresh
 
-    func refresh() async {
+    /// `manual` (the popover button / first launch) also refetches the plan badge;
+    /// timer ticks refetch it only once it's older than `planMaxAge`.
+    func refresh(manual: Bool = true) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
@@ -78,6 +76,8 @@ final class Store {
         // Fetch both sources concurrently; ccusage is best-effort (detail only).
         async let usageResult = UsageAPI.fetch()
         async let blockResult = try? CCUsageSource.fetch()
+        let wantPlan = manual || planFetchedAt.map { Date().timeIntervalSince($0) > Self.planMaxAge } ?? true
+        async let planResult: Result<Profile, Error>? = wantPlan ? Self.fetchPlan() : nil
 
         do {
             usage = try await usageResult
@@ -94,7 +94,25 @@ final class Store {
             usageError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         block = await blockResult ?? block   // keep last good block on failure
+        if let r = await planResult { applyPlan(r) }
         lastRefresh = Date()
+    }
+
+    private nonisolated static func fetchPlan() async -> Result<Profile, Error> {
+        do { return .success(try await ProfileAPI.fetch()) } catch { return .failure(error) }
+    }
+
+    /// Plan failures never touch `usageError`: the badge is decoration, usage is the job.
+    /// Keep the last good badge on failure; record why for --selftest / debugging.
+    func applyPlan(_ result: Result<Profile, Error>) {
+        switch result {
+        case .success(let profile):
+            plan = PlanBadge.text(for: profile.organization)
+            planError = plan == nil ? "profile has no plan fields" : nil
+            planFetchedAt = Date()
+        case .failure(let error):
+            planError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     /// One-shot retry after a 429, honoring `Retry-After` clamped to `retryBounds`.
@@ -104,7 +122,7 @@ final class Store {
                             Self.retryBounds.lowerBound), Self.retryBounds.upperBound)
         retryTimer?.invalidate()
         retryTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+            Task { @MainActor in await self?.refresh(manual: false) }
         }
     }
 
@@ -112,7 +130,7 @@ final class Store {
         timer?.invalidate()
         let seconds = TimeInterval(max(1, intervalMinutes) * 60)
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+            Task { @MainActor in await self?.refresh(manual: false) }
         }
     }
 }
