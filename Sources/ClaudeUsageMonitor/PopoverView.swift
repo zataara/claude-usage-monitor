@@ -14,6 +14,13 @@ struct PopoverView: View {
             if let err = store.usageError {
                 errorBanner(err)
             }
+            if store.plan == nil, let planErr = store.planError {
+                Text("Plan unavailable — \(planErr)")
+                    .font(.caption2)
+                    .foregroundStyle(p.subtle)
+                    .lineLimit(1)
+                    .help(planErr)
+            }
 
             // Focal: official rate-limit windows, data-driven from limits[].
             VStack(spacing: 10) {
