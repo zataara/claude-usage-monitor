@@ -178,11 +178,18 @@ enum AppError: LocalizedError {
     case http(Int)
     case rateLimited(retryAfter: TimeInterval?)
     case ccusage(String)
+    /// The headless CLI refresh (`CLIRefresher`) could not renew the token.
+    case reauthRequired(ReauthReason)
+
+    enum ReauthReason: Sendable, Equatable { case cliNotFound, timedOut, tokenNotExtended }
 
     var errorDescription: String? {
         switch self {
         case .keychain(let m): return "Keychain: \(m)"
-        case .http(401): return "Auth expired — open Claude Code to refresh, then retry."
+        case .reauthRequired(.cliNotFound):
+            return "Claude Code CLI not found on the login-shell PATH — install it, then run `claude auth login` in a terminal."
+        case .reauthRequired:
+            return "Claude Code login expired — run `claude auth login` in a terminal."
         case .http(let c): return "Usage API returned HTTP \(c)."
         case .rateLimited: return "Rate-limited by the usage API — retrying shortly."
         case .ccusage(let m): return "ccusage: \(m)"

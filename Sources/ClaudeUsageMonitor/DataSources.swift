@@ -5,15 +5,23 @@ import Foundation
 /// Reads the current Claude Code OAuth access token from the login keychain.
 /// We shell out to `/usr/bin/security` (the exact path that works interactively)
 /// rather than SecItem so the app inherits the same ACL prompt/allow flow.
-/// Read fresh on every poll — never cached — so Claude Code's own token refresh
-/// keeps us valid.
+/// Read fresh on every poll — never cached — so the CLI's token refresh (which
+/// `CLIRefresher` triggers) is picked up on the next read.
+struct Credential: Sendable {
+    let accessToken: String
+    /// `claudeAiOauth.expiresAt` (epoch ms); nil when the item doesn't carry it.
+    let expiresAt: Date?
+}
+
 enum Keychain {
     private struct Creds: Decodable {
         let claudeAiOauth: OAuth
-        struct OAuth: Decodable { let accessToken: String }
+        struct OAuth: Decodable { let accessToken: String; let expiresAt: Double? }
     }
 
-    static func claudeAccessToken() throws -> String {
+    static func claudeAccessToken() throws -> String { try claudeCredential().accessToken }
+
+    static func claudeCredential() throws -> Credential {
         let out = try Shell.run(
             "/usr/bin/security",
             ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
@@ -22,7 +30,9 @@ enum Keychain {
             throw AppError.keychain("no Claude Code credentials found")
         }
         do {
-            return try JSONDecoder().decode(Creds.self, from: Data(out.utf8)).claudeAiOauth.accessToken
+            let o = try JSONDecoder().decode(Creds.self, from: Data(out.utf8)).claudeAiOauth
+            return Credential(accessToken: o.accessToken,
+                              expiresAt: o.expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) })
         } catch {
             throw AppError.keychain("unexpected credential format")
         }
@@ -37,16 +47,53 @@ enum OAuthAPI {
     static let base = URL(string: "https://api.anthropic.com/api/oauth/")!
     private static let beta = "oauth-2025-04-20"
 
-    /// `session` / `token` are injectable so tests can stub the network and skip the keychain;
-    /// production always uses the defaults.
+    /// `session` / `credential` / `refresher` are injectable so tests can stub the network, the keychain
+    /// and the CLI; production always uses the defaults.
+    ///
+    /// Auth: refresh first when the token is near expiry, and once more on a 401; after a successful refresh
+    /// the request is re-sent once. A 401 that survives a refresh is `.reauthRequired(.tokenNotExtended)`.
     static func get<T: Decodable>(
         _ path: String,
         as: T.Type,
         session: URLSession = .shared,
-        token tokenProvider: @Sendable @escaping () throws -> String = { try Keychain.claudeAccessToken() }
+        credential: @Sendable @escaping () throws -> Credential = { try Keychain.claudeCredential() },
+        refresher: CLIRefresher = .shared
     ) async throws -> T {
-        let token = try await Task.detached { try tokenProvider() }.value
+        let read = { try await Task.detached { try credential() }.value }
+        var cred = try await read()
+        if CLIRefresher.needsPreflight(expiresAt: cred.expiresAt) {
+            try await refresher.refresh()
+            cred = try await read()
+        }
+        do {
+            return try await send(path, as: T.self, session: session, token: cred.accessToken)
+        } catch AppError.http(401) {
+            try await refresher.refresh()
+            cred = try await read()
+            do {
+                return try await send(path, as: T.self, session: session, token: cred.accessToken)
+            } catch AppError.http(401) {
+                throw AppError.reauthRequired(.tokenNotExtended)
+            }
+        }
+    }
 
+    /// Token-only overload kept for tests that don't exercise refresh: a credential with no expiry and a
+    /// refresher whose CLI run never extends it.
+    static func get<T: Decodable>(
+        _ path: String,
+        as: T.Type,
+        session: URLSession = .shared,
+        token tokenProvider: @Sendable @escaping () throws -> String
+    ) async throws -> T {
+        try await get(path, as: T.self, session: session,
+                      credential: { Credential(accessToken: try tokenProvider(), expiresAt: nil) },
+                      refresher: CLIRefresher(runner: { _, _ in .exited(0) }, expiry: { nil }))
+    }
+
+    private static func send<T: Decodable>(
+        _ path: String, as: T.Type, session: URLSession, token: String
+    ) async throws -> T {
         var req = URLRequest(url: base.appendingPathComponent(path))
         req.timeoutInterval = 15
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

@@ -41,10 +41,82 @@ struct OAuthAPITests {
         #expect(p.organization?.planDisplayName == "Ultra")
     }
 
+    // Criterion 10: a 401 the refresh can't fix is a reauth prompt, not a bare HTTP code.
     @Test func unauthorized401() async {
         await #expect {
             _ = try await OAuthAPI.get("usage", as: UsageResponse.self, session: session(401), token: token)
-        } throws: { ($0 as? AppError).map { if case .http(401) = $0 { true } else { false } } ?? false }
+        } throws: { ($0 as? AppError).map { if case .reauthRequired(.tokenNotExtended) = $0 { true } else { false } } ?? false }
+    }
+
+    // MARK: refresh paths — the fake keychain's token is "t<runs>", so the bearer shows which credential was sent.
+
+    private let profileBody = #"{"organization":{"plan_display_name":"Ultra"}}"#
+
+    /// Replies with `codes` in order (last one repeats) and records each request's bearer token.
+    private func sequence(_ codes: [Int], seen: Locked<[String]>) -> URLSession {
+        let body = profileBody
+        StubProtocol.responder = { req in
+            let auth = req.value(forHTTPHeaderField: "Authorization") ?? ""
+            var n = 0
+            seen.mutate { $0.append(String(auth.dropFirst("Bearer ".count))); n = $0.count }
+            return (codes[min(n, codes.count) - 1], [:], Data(body.utf8))
+        }
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.protocolClasses = [StubProtocol.self]
+        return URLSession(configuration: cfg)
+    }
+
+    private func credential(_ cli: FakeCLI) -> @Sendable () throws -> Credential {
+        { [runs = cli.runs, expiry = cli.expiry] in Credential(accessToken: "t\(runs.value)", expiresAt: expiry.value) }
+    }
+
+    // Criterion 1
+    @Test func freshTokenNeverRefreshes() async throws {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(3600)), seen = Locked<[String]>([])
+        _ = try await OAuthAPI.get("profile", as: Profile.self, session: sequence([200], seen: seen),
+                                   credential: credential(cli), refresher: cli.refresher())
+        #expect(cli.runs.value == 0)
+        #expect(seen.value == ["t0"])
+    }
+
+    // Criterion 2
+    @Test func nearExpiryRefreshesBeforeRequest() async throws {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(300)), seen = Locked<[String]>([])
+        _ = try await OAuthAPI.get("profile", as: Profile.self, session: sequence([200], seen: seen),
+                                   credential: credential(cli), refresher: cli.refresher())
+        #expect(cli.runs.value == 1)
+        #expect(seen.value == ["t1"])
+    }
+
+    // Criterion 3
+    @Test func unauthorizedThenRefreshRetriesOnce() async throws {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(3600)), seen = Locked<[String]>([])
+        let p = try await OAuthAPI.get("profile", as: Profile.self, session: sequence([401, 200], seen: seen),
+                                       credential: credential(cli), refresher: cli.refresher())
+        #expect(p.organization?.planDisplayName == "Ultra")
+        #expect(cli.runs.value == 1)
+        #expect(seen.value == ["t0", "t1"])
+    }
+
+    // Criterion 4
+    @Test func unauthorizedRefreshNotExtendedNoRetry() async {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(3600)), seen = Locked<[String]>([])
+        await #expect {
+            _ = try await OAuthAPI.get("profile", as: Profile.self, session: self.sequence([401, 200], seen: seen),
+                                       credential: self.credential(cli), refresher: cli.refresher(extends: false))
+        } throws: { ($0 as? AppError).map { if case .reauthRequired(.tokenNotExtended) = $0 { true } else { false } } ?? false }
+        #expect(seen.value.count == 1)
+    }
+
+    // Criterion 5
+    @Test func unauthorizedAfterRefreshIsReauth() async {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(3600)), seen = Locked<[String]>([])
+        await #expect {
+            _ = try await OAuthAPI.get("profile", as: Profile.self, session: self.sequence([401, 401], seen: seen),
+                                       credential: self.credential(cli), refresher: cli.refresher())
+        } throws: { ($0 as? AppError).map { if case .reauthRequired(.tokenNotExtended) = $0 { true } else { false } } ?? false }
+        #expect(seen.value.count == 2)
+        #expect(cli.runs.value == 1)
     }
 
     @Test func rateLimited429CarriesRetryAfter() async {

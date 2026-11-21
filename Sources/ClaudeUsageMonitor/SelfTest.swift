@@ -1,21 +1,35 @@
 import Foundation
 
 /// Headless diagnostic: exercises the real data pipeline (keychain → usage endpoint →
-/// decode → ccusage) and prints a summary. Run: `ClaudeUsageMonitor --selftest`.
+/// decode → ccusage) and prints a summary. Run: `ClaudeUsageMonitor --selftest [--refresh]`;
+/// `--refresh` forces one headless CLI refresh first and fails the run if it doesn't renew the token.
 /// Never prints the OAuth token.
 enum SelfTest {
-    static func run() -> Never {
+    static func run(forceRefresh: Bool = false) -> Never {
         setbuf(stdout, nil)   // unbuffered so progress shows even when piped
         Task {
             var code: Int32 = 0
 
             // 1. Keychain
             do {
-                let tok = try await Task.detached { try Keychain.claudeAccessToken() }.value
-                print("✓ keychain token: \(tok.count) chars (redacted)")
+                let c = try await Task.detached { try Keychain.claudeCredential() }.value
+                print("✓ keychain token: \(c.accessToken.count) chars (redacted)")
+                print("• token expires in \(c.expiresAt.map { "\(Int($0.timeIntervalSinceNow / 60))m" } ?? "? (no expiresAt)")")
             } catch {
                 print("✗ keychain: \(error.localizedDescription)")
                 exit(1)
+            }
+
+            // 1b. Forced CLI refresh
+            if forceRefresh {
+                do {
+                    try await CLIRefresher.shared.refresh()
+                    let e = try? Keychain.claudeCredential().expiresAt
+                    print("✓ refresh: token expires in \(e.map { "\(Int($0.timeIntervalSinceNow / 60))m" } ?? "?")")
+                } catch {
+                    print("✗ refresh: \(error.localizedDescription)")
+                    exit(1)
+                }
             }
 
             // 2. Official usage endpoint

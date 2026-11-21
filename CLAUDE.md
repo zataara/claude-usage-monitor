@@ -8,7 +8,7 @@ one user. Not a product; no distribution/notarization concerns.
 - **Swift 6 / SwiftUI**, SPM executable target (no `.xcodeproj` — `Package.swift` opens
   in Xcode and builds from CLI). `build.sh` wraps the binary into an `LSUIElement` `.app`.
 - No third-party Swift packages. Runtime deps: `security` (system), `ccusage` + `node`
-  (Homebrew), the Claude Code keychain credential.
+  (Homebrew), the Claude Code keychain credential, the `claude` CLI (token refresh).
 
 ## Data sources (don't confuse them)
 
@@ -20,6 +20,11 @@ one user. Not a product; no distribution/notarization concerns.
 2. **ccusage** (`zsh -lc 'ccusage blocks --active --json'`) — detail only (tokens, burn
    rate, projection). Its `$` is API-equivalent pricing, NOT the plan bill. Best-effort:
    the app must still work if ccusage is missing.
+3. **Token refresh** — `CLIRefresher` runs `zsh -lc 'claude plugin list'` when the token is
+   within 10 min of `expiresAt` or a call returns 401, so the CLI refreshes and writes back
+   the token. Never call the OAuth token endpoint or write the keychain from the app (refresh-token
+   rotation race with the CLI). This relies on undocumented CLI behavior; `--selftest --refresh`
+   re-proves it.
 
 ## Conventions
 

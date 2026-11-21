@@ -5,7 +5,7 @@ enum Entry {
     static func main() {
         let args = CommandLine.arguments
         if args.contains("--selftest") {
-            SelfTest.run()
+            SelfTest.run(forceRefresh: args.contains("--refresh"))
         } else if let i = args.firstIndex(of: "--snapshot") {
             let path = i + 1 < args.count ? args[i + 1] : "popover.png"
             Snapshot.run(path: path)
