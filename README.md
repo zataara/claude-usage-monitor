@@ -78,7 +78,8 @@ show "run `claude auth login`", keeping the last good values and retrying after 
 
 Diagnose: `ClaudeUsageMonitor.app/Contents/MacOS/ClaudeUsageMonitor --selftest [--refresh]` prints the
 token's expiry and, with `--refresh`, forces one refresh. Logs:
-`log show --predicate 'subsystem == "codes.bryant.ClaudeUsageMonitor" && category == "auth"' --last 1h`.
+`/usr/bin/log show --info --predicate 'subsystem == "codes.bryant.ClaudeUsageMonitor" && category == "auth"' --last 1h`
+(full path: zsh has a `log` builtin; `--info`: success lines are info level).
 
 ## Layout
 
