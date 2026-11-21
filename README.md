@@ -66,9 +66,20 @@ Open the first time, or `xattr -dr com.apple.quarantine ClaudeUsageMonitor.app`.
 
 The app reads the **current** OAuth token from your keychain on every poll (never
 cached) and sends it only to `api.anthropic.com` — the same endpoint Claude Code's own
-`/usage` command calls. When the token expires and Claude Code hasn't refreshed it, the
-usage call returns 401 and the app surfaces a "reauth" banner while keeping the last
-good values.
+`/usage` command calls.
+
+The access token lives ~8 h, and only the `claude` CLI refreshes it. The Desktop app keeps its own
+credentials, so the keychain copy goes stale while you work there. The app keeps it fresh itself:
+when the token is within 10 min of expiry, or a call returns 401, it runs `claude plugin list`
+headlessly (via a login shell, output discarded; no model call, ~1 s). That makes the CLI refresh
+and write the new token back. The app never touches the refresh token. Only when that fails
+(CLI not on the login-shell PATH, or the refresh token itself expired, roughly monthly) does it
+show "run `claude auth login`", keeping the last good values and retrying after a 5 min cooldown.
+
+Diagnose: `ClaudeUsageMonitor.app/Contents/MacOS/ClaudeUsageMonitor --selftest [--refresh]` prints the
+token's expiry and, with `--refresh`, forces one refresh. Logs:
+`/usr/bin/log show --info --predicate 'subsystem == "codes.bryant.ClaudeUsageMonitor" && category == "auth"' --last 1h`
+(full path: zsh has a `log` builtin; `--info`: success lines are info level).
 
 ## Layout
 
@@ -79,6 +90,7 @@ Sources/ClaudeUsageMonitor/
   Store.swift        @Observable refresh loop + timer + derived values
   Labeling.swift     pure menu-bar text selection + plan badge mapping (unit-tested)
   DataSources.swift  keychain token, usage endpoint, ccusage process
+  CLIRefresher.swift headless `claude plugin list` token refresh (single-flight, cooldown)
   Models.swift       Codable models + lenient ISO-8601 decoder
   Theme.swift        Claude palette (scheme-aware) + formatting
   LoginItem.swift    SMAppService launch-at-login wrapper
