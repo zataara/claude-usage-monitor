@@ -43,7 +43,7 @@ private func reason(_ e: Error) -> AppError.ReauthReason? {
 @Suite struct CLIRefresherTests {
     @Test func successExtendsExpiry() async throws {
         let cli = FakeCLI(expiry: Date().addingTimeInterval(-60))
-        try await cli.refresher().refresh()
+        #expect(try await cli.refresher().refresh() == .refreshed)
         #expect(cli.runs.value == 1)
         #expect(cli.expiry.value! > Date().addingTimeInterval(7 * 3600))
     }
@@ -63,6 +63,16 @@ private func reason(_ e: Error) -> AppError.ReauthReason? {
     @Test func timeoutIsTimedOut() async {
         let cli = FakeCLI(expiry: Date())
         await #expect { try await cli.refresher(result: .timedOut).refresh() } throws: { reason($0) == .timedOut }
+    }
+
+    // QA finding 2026-11-20: the CLI leaves a still-valid token alone. That is not a failure and must not
+    // start the cooldown.
+    @Test func validTokenKeptIsNotNeededAndNoCooldown() async throws {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(3600))
+        let r = cli.refresher(extends: false)
+        #expect(try await r.refresh() == .notNeeded)
+        #expect(try await r.refresh() == .notNeeded)
+        #expect(cli.runs.value == 2)
     }
 
     @Test func zeroExitWithoutNewExpiryIsTokenNotExtended() async {

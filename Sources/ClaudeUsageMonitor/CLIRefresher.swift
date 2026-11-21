@@ -9,6 +9,10 @@ import os
 /// call). The monitor never touches the refresh token, so there is no rotation race with the CLI.
 actor CLIRefresher {
     enum RunResult: Sendable, Equatable { case exited(Int32), timedOut, launchFailed }
+    /// `notNeeded`: the CLI ran but kept a token that is still valid. It refreshes only near or past
+    /// expiry, on its own threshold (2026-11-20: a token with 458 min left was left alone), so this is
+    /// not a failure.
+    enum Outcome: Sendable, Equatable { case refreshed, notNeeded }
     typealias Runner = @Sendable (_ command: String, _ timeout: TimeInterval) async -> RunResult
 
     static let defaultCommand = "claude plugin list"
@@ -28,7 +32,7 @@ actor CLIRefresher {
     private let now: @Sendable () -> Date
     private let log = Logger(subsystem: "codes.bryant.ClaudeUsageMonitor", category: "auth")
 
-    private var inFlight: Task<Void, Error>?
+    private var inFlight: Task<Outcome, Error>?
     private var lastFailure: (at: Date, reason: AppError.ReauthReason)?
 
     init(
@@ -55,7 +59,8 @@ actor CLIRefresher {
 
     /// Runs the CLI once; concurrent callers share the same run. Throws `.reauthRequired` on failure, and
     /// immediately (without running the CLI) while a previous failure's cooldown is active.
-    func refresh() async throws {
+    @discardableResult
+    func refresh() async throws -> Outcome {
         if let running = inFlight { return try await running.value }
         if let f = lastFailure, now().timeIntervalSince(f.at) < cooldown {
             throw AppError.reauthRequired(f.reason)
@@ -64,15 +69,16 @@ actor CLIRefresher {
         inFlight = task
         defer { inFlight = nil }
         do {
-            try await task.value
+            let outcome = try await task.value
             lastFailure = nil
+            return outcome
         } catch let AppError.reauthRequired(reason) {
             lastFailure = (now(), reason)
             throw AppError.reauthRequired(reason)
         }
     }
 
-    private func perform() async throws {
+    private func perform() async throws -> Outcome {
         let before = expiry()
         log.info("refresh attempted")
         let result = await runner(command, timeout)
@@ -84,13 +90,18 @@ actor CLIRefresher {
             log.error("refresh failed: timedOut after \(self.timeout, privacy: .public)s")
             throw AppError.reauthRequired(.timedOut)
         case .exited(let code):
-            // Exit status alone is not success: only a later expiry proves the CLI refreshed.
-            guard let after = expiry(), after > (before ?? .distantPast), after > now() else {
+            // Exit status alone is not success: only an expiry still in the future proves a usable token.
+            guard let after = expiry(), after > now() else {
                 log.error("refresh failed: tokenNotExtended (exit \(code, privacy: .public))")
                 throw AppError.reauthRequired(.tokenNotExtended)
             }
             let minutes = Int(after.timeIntervalSince(now()) / 60)
-            log.info("refresh succeeded: token expires in \(minutes, privacy: .public)m (exit \(code, privacy: .public))")
+            if after > (before ?? .distantPast) {
+                log.info("refresh succeeded: token expires in \(minutes, privacy: .public)m (exit \(code, privacy: .public))")
+                return .refreshed
+            }
+            log.info("refresh not needed: CLI kept a valid token, expires in \(minutes, privacy: .public)m")
+            return .notNeeded
         }
     }
 

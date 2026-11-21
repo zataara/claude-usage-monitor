@@ -23,9 +23,13 @@ enum SelfTest {
             // 1b. Forced CLI refresh
             if forceRefresh {
                 do {
-                    try await CLIRefresher.shared.refresh()
+                    let outcome = try await CLIRefresher.shared.refresh()
                     let e = try? Keychain.claudeCredential().expiresAt
-                    print("✓ refresh: token expires in \(e.map { "\(Int($0.timeIntervalSinceNow / 60))m" } ?? "?")")
+                    let left = e.map { "\(Int($0.timeIntervalSinceNow / 60))m" } ?? "?"
+                    switch outcome {
+                    case .refreshed: print("✓ refresh: renewed, token expires in \(left)")
+                    case .notNeeded: print("✓ refresh: CLI ran, token still valid (expires in \(left)) — not needed")
+                    }
                 } catch {
                     print("✗ refresh: \(error.localizedDescription)")
                     exit(1)

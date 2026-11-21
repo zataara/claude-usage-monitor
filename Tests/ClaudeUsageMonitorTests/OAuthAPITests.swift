@@ -98,14 +98,24 @@ struct OAuthAPITests {
         #expect(seen.value == ["t0", "t1"])
     }
 
-    // Criterion 4
-    @Test func unauthorizedRefreshNotExtendedNoRetry() async {
-        let cli = FakeCLI(expiry: Date().addingTimeInterval(3600)), seen = Locked<[String]>([])
+    // Criterion 4a: expired token the CLI doesn't renew → reauth before any request is sent.
+    @Test func expiredTokenNotExtendedIsReauthWithoutRequest() async {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(-60)), seen = Locked<[String]>([])
         await #expect {
-            _ = try await OAuthAPI.get("profile", as: Profile.self, session: self.sequence([401, 200], seen: seen),
+            _ = try await OAuthAPI.get("profile", as: Profile.self, session: self.sequence([200], seen: seen),
                                        credential: self.credential(cli), refresher: cli.refresher(extends: false))
         } throws: { ($0 as? AppError).map { if case .reauthRequired(.tokenNotExtended) = $0 { true } else { false } } ?? false }
-        #expect(seen.value.count == 1)
+        #expect(seen.value.isEmpty)
+        #expect(cli.runs.value == 1)
+    }
+
+    // Criterion 4b: 401 on a still-valid token the CLI keeps (notNeeded) → exactly one retry, same token.
+    @Test func unauthorizedValidTokenKeptRetriesOnceWithSameToken() async throws {
+        let cli = FakeCLI(expiry: Date().addingTimeInterval(3600)), seen = Locked<[String]>([])
+        _ = try await OAuthAPI.get("profile", as: Profile.self, session: sequence([401, 200], seen: seen),
+                                   credential: credential(cli), refresher: cli.refresher(extends: false))
+        #expect(seen.value == ["t0", "t1"])   // t<runs>: the CLI ran once; the keychain token text is the stub's
+        #expect(cli.runs.value == 1)
     }
 
     // Criterion 5
