@@ -2,9 +2,13 @@ import Foundation
 
 /// Headless diagnostic: exercises the real data pipeline (keychain → usage endpoint →
 /// decode → ccusage) and prints a summary. Run: `ClaudeUsageMonitor --selftest [--refresh]`;
-/// `--refresh` forces one headless CLI refresh first and fails the run if it doesn't renew the token.
-/// Never prints the OAuth token.
+/// `--refresh` forces one headless CLI refresh first and fails the run only if the token ends up unusable
+/// (a still-valid token the CLI keeps reads "not needed"). Never prints the OAuth token.
 enum SelfTest {
+    private static func minutesLeft(_ expiry: Date??) -> String? {
+        (expiry ?? nil).map { "\(Int($0.timeIntervalSinceNow / 60))m" }
+    }
+
     static func run(forceRefresh: Bool = false) -> Never {
         setbuf(stdout, nil)   // unbuffered so progress shows even when piped
         Task {
@@ -14,7 +18,7 @@ enum SelfTest {
             do {
                 let c = try await Task.detached { try Keychain.claudeCredential() }.value
                 print("✓ keychain token: \(c.accessToken.count) chars (redacted)")
-                print("• token expires in \(c.expiresAt.map { "\(Int($0.timeIntervalSinceNow / 60))m" } ?? "? (no expiresAt)")")
+                print("• token expires in \(minutesLeft(c.expiresAt) ?? "? (no expiresAt)")")
             } catch {
                 print("✗ keychain: \(error.localizedDescription)")
                 exit(1)
@@ -24,8 +28,7 @@ enum SelfTest {
             if forceRefresh {
                 do {
                     let outcome = try await CLIRefresher.shared.refresh()
-                    let e = try? Keychain.claudeCredential().expiresAt
-                    let left = e.map { "\(Int($0.timeIntervalSinceNow / 60))m" } ?? "?"
+                    let left = minutesLeft(try? Keychain.claudeCredential().expiresAt) ?? "?"
                     switch outcome {
                     case .refreshed: print("✓ refresh: renewed, token expires in \(left)")
                     case .notNeeded: print("✓ refresh: CLI ran, token still valid (expires in \(left)) — not needed")

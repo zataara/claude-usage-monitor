@@ -51,7 +51,8 @@ actor CLIRefresher {
         self.now = now
     }
 
-    /// True when the token is missing an expiry we can trust to be comfortably in the future.
+    /// True when the token expires within `preflightMargin` (or already has). An unknown expiry is false:
+    /// the 401 path handles it.
     nonisolated static func needsPreflight(expiresAt: Date?, now: Date = Date()) -> Bool {
         guard let e = expiresAt else { return false }   // unknown expiry: let the 401 path decide
         return e.timeIntervalSince(now) < preflightMargin

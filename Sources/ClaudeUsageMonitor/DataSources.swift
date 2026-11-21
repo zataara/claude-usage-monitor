@@ -19,8 +19,6 @@ enum Keychain {
         struct OAuth: Decodable { let accessToken: String; let expiresAt: Double? }
     }
 
-    static func claudeAccessToken() throws -> String { try claudeCredential().accessToken }
-
     static func claudeCredential() throws -> Credential {
         let out = try Shell.run(
             "/usr/bin/security",
@@ -50,8 +48,9 @@ enum OAuthAPI {
     /// `session` / `credential` / `refresher` are injectable so tests can stub the network, the keychain
     /// and the CLI; production always uses the defaults.
     ///
-    /// Auth: refresh first when the token is near expiry, and once more on a 401; after a successful refresh
-    /// the request is re-sent once. A 401 that survives a refresh is `.reauthRequired(.tokenNotExtended)`.
+    /// Auth: refresh first when the token is near expiry, and once more on a 401. When that refresh doesn't
+    /// throw (`.refreshed` or `.notNeeded`), the request is re-sent once with a re-read token. A 401 that
+    /// survives the retry is `.reauthRequired(.tokenNotExtended)`.
     static func get<T: Decodable>(
         _ path: String,
         as: T.Type,
