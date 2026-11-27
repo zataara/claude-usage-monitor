@@ -20,7 +20,8 @@ one user. Not a product; no distribution/notarization concerns.
 2. **ccusage** (`zsh -lc 'ccusage blocks --active --json'`) — detail only (tokens, burn
    rate, projection). Its `$` is API-equivalent pricing, NOT the plan bill. Best-effort:
    the app must still work if ccusage is missing.
-3. **Token refresh** — `CLIRefresher` runs `zsh -lc 'claude plugin list'` when the token is
+3. **Token refresh** — `CLIRefresher` runs `claude plugin list` (the absolute path `CLILocator`
+   finds, else `zsh -lc 'claude plugin list'`) when the token is
    within 10 min of `expiresAt` or a call returns 401, so the CLI refreshes and writes back
    the token. Never call the OAuth token endpoint or write the keychain from the app (refresh-token
    rotation race with the CLI). This relies on undocumented CLI behavior; `--selftest --refresh`
@@ -31,8 +32,11 @@ one user. Not a product; no distribution/notarization concerns.
 - Double-quoted strings, function-style SwiftUI views.
 - The OAuth token is read fresh from the keychain every poll, never cached, never logged.
   It is sent only to `api.anthropic.com`. Treat it as a secret.
-- GUI apps get a minimal PATH — always resolve external tools by absolute path or via a
-  login shell (`/bin/zsh -lc …`). This is why ccusage runs through zsh.
+- GUI apps get a minimal PATH — resolve external tools by absolute path (`CLILocator` for
+  `claude`) or via a login shell (`/bin/zsh -lc …`, which is why ccusage runs through zsh).
+  `zsh -lc` is non-interactive: it reads `.zprofile` (Homebrew) but not `.zshrc`, so a tool
+  installed in `~/.local/bin` is invisible to it (TLS-0-194). Prove a lookup with
+  `env -i HOME=$HOME USER=$USER <binary> --selftest --refresh`.
 - Dates: the endpoint returns ISO-8601 with 6-digit fractional seconds + offset; decode
   via the lenient `JSON.decoder` in Models.swift.
 - **Commits:** stage + commit + push at the end of a working session without asking —

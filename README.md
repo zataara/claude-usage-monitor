@@ -71,9 +71,10 @@ cached) and sends it only to `api.anthropic.com` — the same endpoint Claude Co
 The access token lives ~8 h, and only the `claude` CLI refreshes it. The Desktop app keeps its own
 credentials, so the keychain copy goes stale while you work there. The app keeps it fresh itself:
 when the token is within 10 min of expiry, or a call returns 401, it runs `claude plugin list`
-headlessly (via a login shell, output discarded; no model call, ~1 s). That makes the CLI refresh
+headlessly (the CLI is found by absolute path in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, else via a
+login shell; output discarded; no model call, ~1 s). That makes the CLI refresh
 and write the new token back. The app never touches the refresh token. Only when that fails
-(CLI not on the login-shell PATH, or the refresh token itself expired, roughly monthly) does it
+(CLI in none of those places, or the refresh token itself expired, roughly monthly) does it
 show "run `claude auth login`", keeping the last good values and retrying after a 5 min cooldown.
 
 Diagnose: `ClaudeUsageMonitor.app/Contents/MacOS/ClaudeUsageMonitor --selftest [--refresh]` prints the
