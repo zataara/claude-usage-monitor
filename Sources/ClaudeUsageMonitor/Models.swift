@@ -187,7 +187,7 @@ enum AppError: LocalizedError {
         switch self {
         case .keychain(let m): return "Keychain: \(m)"
         case .reauthRequired(.cliNotFound):
-            return "Claude Code CLI not found on the login-shell PATH — install it, then run `claude auth login` in a terminal."
+            return "Claude Code CLI not found (looked in \(CLILocator.candidates.joined(separator: ", ")) and the login-shell PATH) — install it, then run `claude auth login` in a terminal."
         case .reauthRequired:
             return "Claude Code login expired — run `claude auth login` in a terminal."
         case .http(let c): return "Usage API returned HTTP \(c)."

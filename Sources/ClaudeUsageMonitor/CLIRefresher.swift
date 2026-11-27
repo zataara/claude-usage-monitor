@@ -1,6 +1,28 @@
 import Foundation
 import os
 
+/// Finds the `claude` binary by absolute path. A GUI app launched at login gets launchd's minimal environment and
+/// `zsh -lc` reads only `.zprofile`, not the interactive `.zshrc` that adds `~/.local/bin` — so PATH lookup alone
+/// misses the native install (TLS-0-194, exit 127). The list is data: add a location here, nowhere else.
+enum CLILocator {
+    /// Ordered, first executable wins. `~` is replaced with the injected home directory.
+    static let candidates = ["~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+
+    static func paths(home: String = NSHomeDirectory()) -> [String] {
+        candidates.map { $0.hasPrefix("~/") ? home + $0.dropFirst(1) : $0 }
+    }
+
+    static func resolve(home: String = NSHomeDirectory(),
+                        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }) -> String? {
+        paths(home: home).first(where: isExecutable)
+    }
+
+    /// `'path' plugin list`, single-quoted so a home directory with spaces or quotes still parses in zsh.
+    static func command(for path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "' plugin list"
+    }
+}
+
 /// Keeps the Claude Code OAuth token in the keychain fresh by asking the `claude` CLI to refresh it.
 ///
 /// The access token lives ~8 h and only the CLI refreshes it, only when the CLI runs. The Desktop app keeps its
@@ -28,6 +50,7 @@ actor CLIRefresher {
     private let timeout: TimeInterval
     private let cooldown: TimeInterval
     private let runner: Runner
+    private let locate: @Sendable () -> String?
     private let expiry: @Sendable () -> Date?
     private let now: @Sendable () -> Date
     private let log = Logger(subsystem: "codes.bryant.ClaudeUsageMonitor", category: "auth")
@@ -40,6 +63,7 @@ actor CLIRefresher {
         timeout: TimeInterval = CLIRefresher.defaultTimeout,
         cooldown: TimeInterval = CLIRefresher.defaultCooldown,
         runner: @escaping Runner = CLIRefresher.processRunner,
+        locate: @escaping @Sendable () -> String? = { CLILocator.resolve() },
         expiry: @escaping @Sendable () -> Date? = { try? Keychain.claudeCredential().expiresAt },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -47,6 +71,7 @@ actor CLIRefresher {
         self.timeout = timeout
         self.cooldown = cooldown
         self.runner = runner
+        self.locate = locate
         self.expiry = expiry
         self.now = now
     }
@@ -82,7 +107,10 @@ actor CLIRefresher {
     private func perform() async throws -> Outcome {
         let before = expiry()
         log.info("refresh attempted")
-        let result = await runner(command, timeout)
+        // Resolved per run, not at init: the CLI may be installed or moved while the app is running. Only the
+        // default command is rewritten; an explicit override (debug hook, tests) runs as given.
+        let resolved = command == Self.defaultCommand ? locate().map(CLILocator.command(for:)) : nil
+        let result = await runner(resolved ?? command, timeout)
         switch result {
         case .launchFailed, .exited(127):
             log.error("refresh failed: cliNotFound (\(String(describing: result), privacy: .public))")

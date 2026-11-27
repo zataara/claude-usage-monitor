@@ -27,6 +27,14 @@ Apps launched from Finder/launchd get a minimal PATH and won't find `ccusage`/`n
 (Homebrew, `/opt/homebrew/bin`). So ccusage runs via `/bin/zsh -lc 'ccusage …'` to load a
 login-shell PATH. `security` is called by absolute path for the same reason.
 
+**Exception: `claude` (TLS-0-194, 2026-11-27).** `zsh -lc` is non-interactive, so it reads `.zprofile` (which
+carries Homebrew) but not `.zshrc`, where `~/.local/bin` is added. The native `claude` install lives there, so a
+login-item launch got exit 127 and the monitor lost token refresh. `CLILocator` therefore probes absolute
+candidates (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`) and runs the first executable one; the login-shell
+`claude` is only the fallback. The owner's shell files are not edited: they belong to a different layer, and an
+app that depends on them breaks silently the next time they change. `ccusage`/`node` keep the login shell (Homebrew
+is on its PATH).
+
 ## Packaging: SPM + build.sh, not an .xcodeproj
 
 A hand-written `.pbxproj` is fragile outside Xcode's GUI. `Package.swift` opens in Xcode and

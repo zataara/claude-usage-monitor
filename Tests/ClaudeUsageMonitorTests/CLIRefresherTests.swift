@@ -35,6 +35,51 @@ struct FakeCLI {
     }
 }
 
+/// TLS-0-194: the app must find `claude` without relying on the login shell's PATH.
+@Suite struct CLILocatorTests {
+    @Test func firstExecutableCandidateWins() {
+        let all = Set(CLILocator.paths(home: "/Users/x"))
+        #expect(CLILocator.resolve(home: "/Users/x", isExecutable: { all.contains($0) }) == "/Users/x/.local/bin/claude")
+        let later = Set(["/opt/homebrew/bin/claude", "/usr/local/bin/claude"])
+        #expect(CLILocator.resolve(home: "/Users/x", isExecutable: { later.contains($0) }) == "/opt/homebrew/bin/claude")
+    }
+
+    @Test func noCandidateIsNilAndMessageNamesEveryPath() {
+        #expect(CLILocator.resolve(home: "/Users/x", isExecutable: { _ in false }) == nil)
+        let message = AppError.reauthRequired(.cliNotFound).errorDescription ?? ""
+        for c in CLILocator.candidates { #expect(message.contains(c)) }
+    }
+
+    @Test func existingButNotExecutableIsSkippedByRealCheck() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cum-\(UUID().uuidString)")
+        let bin = dir.appendingPathComponent(".local/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = bin.appendingPathComponent("claude")
+        try Data().write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+        #expect(CLILocator.resolve(home: dir.path) != file.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        #expect(CLILocator.resolve(home: dir.path) == file.path)
+    }
+
+    @Test func commandQuotesPathWithSpacesAndQuotes() {
+        #expect(CLILocator.command(for: "/Users/a b/.local/bin/claude") == "'/Users/a b/.local/bin/claude' plugin list")
+        #expect(CLILocator.command(for: "/Users/o'x/claude") == "'/Users/o'\\''x/claude' plugin list")
+    }
+
+    @Test func refresherRunsResolvedAbsolutePathElseBareCommand() async throws {
+        let seen = Locked<[String]>([])
+        let runner: CLIRefresher.Runner = { cmd, _ in seen.mutate { $0.append(cmd) }; return .exited(0) }
+        let later = Date().addingTimeInterval(8 * 3600)
+        let hit = CLIRefresher(runner: runner, locate: { "/Users/x/.local/bin/claude" }, expiry: { later })
+        _ = try await hit.refresh()
+        let miss = CLIRefresher(runner: runner, locate: { nil }, expiry: { later })
+        _ = try await miss.refresh()
+        #expect(seen.value == ["'/Users/x/.local/bin/claude' plugin list", "claude plugin list"])
+    }
+}
+
 private func reason(_ e: Error) -> AppError.ReauthReason? {
     if case let AppError.reauthRequired(r)? = e as? AppError { return r }
     return nil
